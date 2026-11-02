@@ -17,7 +17,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer, OneHotEncoder, StandardScaler
 
 from src.config import (
-    CATEGORICAL_FEATURES, COLUMN_ALIASES, DATA_PATH, FEATURES, GENDER_VALUES,
+    CATEGORICAL_FEATURES, COLUMN_ALIASES, DATA_PATH, FEATURES, FEATURE_SPECS, GENDER_VALUES,
     LOG_FEATURES, NUMERIC_FEATURES, OTHER_NUMERIC_FEATURES, TARGET,
     TARGET_ALIASES, UCI_COLUMN_ORDER,
 )
@@ -98,14 +98,16 @@ def load_dataset(path: str | Path = DATA_PATH) -> pd.DataFrame:
     gender = df["Gender"].astype(str).str.strip().str.title()
     df["Gender"] = gender.where(gender.isin(GENDER_VALUES), np.nan)
 
-    # Numeric coercion; negative / zero lab values are invalid -> NaN
+    # Numeric coercion; permit zero only where the input specification allows it.
     invalid = 0
     for col in NUMERIC_FEATURES:
         original_missing = pd.to_numeric(df[col], errors="coerce").isna() & df[col].notna()
         df[col] = pd.to_numeric(df[col], errors="coerce")
-        non_positive = df[col] <= 0
-        invalid += int(original_missing.sum() + non_positive.sum())
-        df.loc[non_positive, col] = np.nan
+        invalid_values = (
+            df[col] < 0 if FEATURE_SPECS[col]["min"] == 0 else df[col] <= 0
+        )
+        invalid += int(original_missing.sum() + invalid_values.sum())
+        df.loc[invalid_values, col] = np.nan
     df.attrs["invalid_values_set_to_nan"] = invalid
     df.attrs["rows_with_unknown_target_dropped"] = int(bad_target.sum())
     return df.reset_index(drop=True)

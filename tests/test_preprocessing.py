@@ -51,6 +51,12 @@ class TestLoading(unittest.TestCase):
         self.assertTrue(np.isnan(df.loc[4, "Total_Bilirubin"]))
         self.assertGreaterEqual(df.attrs["invalid_values_set_to_nan"], 1)
 
+    def test_zero_direct_bilirubin_is_valid(self):
+        rows = UCI_ROWS + ["30,Male,1,0,100,20,20,6,3,1,1"]
+        df = load_dataset(self._write("\n".join(rows)))
+        self.assertEqual(df.loc[4, "Direct_Bilirubin"], 0)
+        self.assertEqual(df.attrs["invalid_values_set_to_nan"], 0)
+
     def test_quality_report_counts(self):
         rep = data_quality_report(load_dataset(self._write("\n".join(UCI_ROWS))))
         self.assertEqual(rep["n_records"], 4)
