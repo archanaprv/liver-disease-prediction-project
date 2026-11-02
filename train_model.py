@@ -11,7 +11,7 @@ EVALUATION PROTOCOL (documented for the report)
    set only (preprocessing is inside the Pipeline, so no leakage). Selection metric: ROC-AUC.
 4. Best model by cross-validated ROC-AUC (tie-break: CV F1) is wrapped in sigmoid probability
    calibration (fitted on training data only).
-5. All candidates and the final calibrated model are evaluated ONCE on the held-out test set.
+5. The selected calibrated model is evaluated ONCE on the held-out test set.
 6. The calibrated pipeline is saved with Joblib; metrics and plots go to outputs/.
 """
 from __future__ import annotations
@@ -63,8 +63,7 @@ def candidate_models(seed: int) -> dict:
              "clf__min_samples_leaf": [3, 5]},
         ),
         "SVM (RBF)": (
-            make_pipeline(SVC(kernel="rbf", class_weight="balanced", probability=True,
-                              random_state=seed)),
+            make_pipeline(SVC(kernel="rbf", class_weight="balanced", random_state=seed)),
             {"clf__C": [0.1, 1, 10], "clf__gamma": ["scale", 0.01, 0.1]},
         ),
     }
@@ -132,7 +131,7 @@ def main():
     print("[4/7] Cross-validated model comparison (training data only) ...")
     cv = StratifiedKFold(n_splits=args.cv_folds, shuffle=True, random_state=args.seed)
     scoring = {"roc_auc": "roc_auc", "f1": "f1", "recall": "recall", "precision": "precision"}
-    rows, fitted, test_outputs = [], {}, {}
+    rows, fitted = [], {}
     for name, (pipe, grid) in candidate_models(args.seed).items():
         t0 = time.time()
         search = GridSearchCV(pipe, grid, scoring=scoring, refit="roc_auc", cv=cv, n_jobs=-1)
@@ -140,9 +139,6 @@ def main():
         i = search.best_index_
         cvr = search.cv_results_
         est = search.best_estimator_
-        prob = est.predict_proba(X_test)[:, 1]
-        pred = (prob >= DECISION_THRESHOLD).astype(int)
-        m = ev.compute_metrics(y_test, pred, prob)
         row = {"model": name,
                "cv_roc_auc": float(cvr["mean_test_roc_auc"][i]),
                "cv_roc_auc_std": float(cvr["std_test_roc_auc"][i]),
@@ -151,10 +147,8 @@ def main():
                "cv_precision": float(cvr["mean_test_precision"][i]),
                "best_params": {k.replace("clf__", ""): (v.item() if hasattr(v, "item") else v)
                                for k, v in search.best_params_.items()}}
-        row.update({f"test_{k}": v for k, v in m.items()})
         rows.append(row)
         fitted[name] = est
-        test_outputs[name] = (prob, pred)
         print(f"      {name:<20} CV ROC-AUC {row['cv_roc_auc']:.3f} "
               f"(+/- {row['cv_roc_auc_std']:.3f})  [{time.time() - t0:.1f}s]")
 
@@ -171,22 +165,17 @@ def main():
     cal_prob = calibrated.predict_proba(X_test)[:, 1]
     cal_pred = (cal_prob >= DECISION_THRESHOLD).astype(int)
     final_metrics = ev.compute_metrics(y_test, cal_pred, cal_prob)
-    uncal_metrics = ev.compute_metrics(y_test, test_outputs[best_name][1],
-                                       test_outputs[best_name][0])
     ci = ev.bootstrap_ci(y_test, cal_pred, cal_prob, seed=args.seed)
 
     # ------------------------------------------------------------------ 6. outputs
     print("[6/7] Saving evaluation plots and reports ...")
     ev.plot_confusion_matrix(y_test, cal_pred, out_dir / "confusion_matrix.png",
                              f"Confusion matrix - {best_name} (calibrated)")
-    ev.plot_confusion_matrices_grid(
-        {n: (y_test, test_outputs[n][1]) for n in fitted}, out_dir / "confusion_matrices_all.png")
-    roc_data = {n: (y_test, test_outputs[n][0]) for n in fitted}
-    roc_data[f"{best_name} (calibrated)"] = (y_test, cal_prob)
-    ev.plot_roc_curves(roc_data, out_dir / "roc_curves.png")
+    ev.plot_roc_curves(
+        {f"{best_name} (calibrated)": (y_test, cal_prob)},
+        out_dir / "roc_curves.png")
     ev.plot_model_comparison(table, out_dir / "model_comparison.png")
-    ev.plot_calibration(y_test, {f"{best_name} (uncalibrated)": test_outputs[best_name][0],
-                                 f"{best_name} (calibrated)": cal_prob},
+    ev.plot_calibration(y_test, {f"{best_name} (calibrated)": cal_prob},
                         out_dir / "calibration_curve.png")
     importance = ev.plot_permutation_importance(calibrated, X_test, y_test,
                                                 out_dir / "feature_importance.png",
@@ -215,7 +204,6 @@ def main():
         "models": rows,
         "selected_model": best_name,
         "final_test_metrics_calibrated": final_metrics,
-        "final_test_metrics_uncalibrated": uncal_metrics,
         "final_test_bootstrap_95ci": ci,
         "feature_importance": importance.round(5).to_dict(orient="records"),
     }

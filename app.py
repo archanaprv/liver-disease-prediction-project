@@ -191,10 +191,7 @@ with tab_predict:
 
             st.subheader("Result")
 
-            if result["predicted_class"] == 1:
-                st.error(result["class_label"])
-            else:
-                st.success(result["class_label"])
+            st.info(result["class_label"])
 
             m1, m2 = st.columns(2)
 
@@ -241,51 +238,87 @@ with tab_perf:
         )
 
     else:
-        metrics = json.loads(metrics_file.read_text())
-        final = metrics["final_test_metrics_calibrated"]
+        try:
+            metrics = json.loads(metrics_file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            st.error("Evaluation results could not be read.")
+            st.code(str(exc))
+        else:
+            if (
+                not isinstance(metrics, dict)
+                or not isinstance(metrics.get("protocol"), dict)
+                or not isinstance(metrics.get("final_test_metrics_calibrated"), dict)
+                or not isinstance(metrics.get("selected_model"), str)
+                or not isinstance(metrics.get("generated_at"), str)
+                or not isinstance(metrics["protocol"].get("n_test"), int)
+                or not all(
+                    key in metrics["final_test_metrics_calibrated"]
+                    for key in (
+                        "accuracy",
+                        "precision",
+                        "recall_sensitivity",
+                        "f1",
+                        "roc_auc",
+                    )
+                )
+            ):
+                st.error(
+                    "Evaluation results are incomplete. Run `python train_model.py` "
+                    "to regenerate them."
+                )
+            elif (
+                metrics.get("selected_model") != meta.get("model_name")
+                or metrics.get("generated_at") != meta.get("trained_at")
+            ):
+                st.warning(
+                    "These evaluation results do not match the loaded model. "
+                    "Run `python train_model.py` to regenerate matching files."
+                )
+            else:
+                final = metrics["final_test_metrics_calibrated"]
 
-        st.write(
-            f"Selected model: **{metrics['selected_model']}** "
-            f"(calibrated). "
-            f"Test set size: {metrics['protocol']['n_test']} records."
-        )
+                st.write(
+                    f"Selected model: **{metrics['selected_model']}** "
+                    f"(calibrated). "
+                    f"Test set size: {metrics['protocol']['n_test']} records."
+                )
 
-        cols = st.columns(5)
+                cols = st.columns(5)
 
-        metric_items = [
-            ("Accuracy", "accuracy"),
-            ("Precision", "precision"),
-            ("Recall", "recall_sensitivity"),
-            ("F1", "f1"),
-            ("ROC-AUC", "roc_auc"),
-        ]
+                metric_items = [
+                    ("Accuracy", "accuracy"),
+                    ("Precision", "precision"),
+                    ("Recall", "recall_sensitivity"),
+                    ("F1", "f1"),
+                    ("ROC-AUC", "roc_auc"),
+                ]
 
-        for c, (label, key) in zip(cols, metric_items):
-            c.metric(label, f"{final[key]:.3f}")
+                for c, (label, key) in zip(cols, metric_items):
+                    c.metric(label, f"{final[key]:.3f}")
 
-        st.caption(
-            "Small test set: see the bootstrap confidence intervals in "
-            "outputs/metrics.json before drawing conclusions."
-        )
+                st.caption(
+                    "Small test set: see the bootstrap confidence intervals in "
+                    "outputs/metrics.json before drawing conclusions."
+                )
 
-        show_images(
-            [
-                ("Confusion matrix", "confusion_matrix.png"),
-                ("ROC curves", "roc_curves.png"),
-                ("Model comparison", "model_comparison.png"),
-                ("Feature importance", "feature_importance.png"),
-            ]
-        )
+                show_images(
+                    [
+                        ("Confusion matrix", "confusion_matrix.png"),
+                        ("ROC curves", "roc_curves.png"),
+                        ("Model comparison", "model_comparison.png"),
+                        ("Feature importance", "feature_importance.png"),
+                    ]
+                )
 
-        csv = OUTPUTS_DIR / "model_comparison.csv"
+                csv = OUTPUTS_DIR / "model_comparison.csv"
 
-        if csv.exists():
-            import pandas as pd
+                if csv.exists():
+                    import pandas as pd
 
-            st.dataframe(
-                pd.read_csv(csv),
-                use_container_width=True,
-            )
+                    st.dataframe(
+                        pd.read_csv(csv),
+                        use_container_width=True,
+                    )
 
 
 # ---------------------------------------------------------------------------

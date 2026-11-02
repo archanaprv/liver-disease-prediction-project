@@ -170,13 +170,13 @@ def plot_roc_curves(roc_data: dict, path):
 
 
 def plot_model_comparison(table: pd.DataFrame, path):
-    metrics = ["cv_roc_auc", "test_roc_auc", "test_recall_sensitivity", "test_precision", "test_f1"]
+    metrics = ["cv_roc_auc", "cv_recall", "cv_precision", "cv_f1"]
     long = table.melt(id_vars="model", value_vars=metrics, var_name="metric", value_name="score")
     fig, ax = plt.subplots(figsize=(10, 5))
     sns.barplot(data=long, x="model", y="score", hue="metric", ax=ax)
     ax.set_ylim(0, 1.05)
     ax.set_xlabel("")
-    ax.set_title("Model comparison")
+    ax.set_title("Cross-validated model comparison (training data)")
     ax.legend(fontsize=8, loc="lower right")
     _save(fig, path)
 
